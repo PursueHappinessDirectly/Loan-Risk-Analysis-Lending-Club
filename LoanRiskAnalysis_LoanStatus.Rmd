@@ -1,0 +1,187 @@
+---
+title: "LoanRiskAnalysis_LoanStatus"
+author: "Liang Tan"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read data      
+
+```{r tidy=TRUE}
+loan <- read.csv('loan.csv',  stringsAsFactors = FALSE) 
+loanT <- loan
+num.NA <- sort(sapply(loan, function(x) sum(is.na(x))), decreasing = TRUE) 
+remain.col = names(num.NA)[(num.NA < 0.8 * dim(loan)[1])]
+delete.col = names(num.NA)[(num.NA >= 0.8 * dim(loan)[1])]
+delete.col
+```
+            
+            
+# Feature engineering and selection     
+
+Target variable pretreatment. I am only interested in making predictions for loans with status as "Current" or "Issued".
+```{r tidy=TRUE}
+loan$loan_status <- gsub('Does not meet the credit policy. Status:', '', loan$loan_status)
+loan <- subset(loan, !loan_status %in% c('Current', 'Issued'))
+loan$loan_status_binary <- with(loan, ifelse(loan_status == 'Fully Paid', 1, 0))
+```
+         
+User feature selection  
+addr_state, emp_title, member_id, zip_code is removed  
+emp_length, home_ownership is reserved  
+```{r tidy=TRUE}
+#encode home_ownership
+loan$home_ownership <- ifelse(loan$home_ownership %in% c('ANY', 'NONE', 'OTHER'), 'OTHER',
+                              loan$home_ownership)
+#encode state information with the help of int_rate
+int_state <- by(loan, loan$addr_state, function(x) {
+  return(mean(x$int_rate))
+})
+
+loan$state_mean_int <-
+  ifelse(loan$addr_state %in% names(int_state)[which(int_state <=
+                                                       quantile(int_state, 0.25))], 'low',
+         ifelse(loan$addr_state %in% names(int_state)[which(int_state <=
+                                                              quantile(int_state, 0.5))],'lowmedium',
+                ifelse(loan$addr_state %in% names(int_state)[which(int_state <= quantile(int_state, 0.75))], 
+                       'mediumhigh', 'high')))
+select.features_1 <- c('home_ownership', 'state_mean_int')
+```
+         
+Financial feature selection  
+combine annual_inc and annual_inc_joint, dti and dti_joint, verification_status and verification_status_joint based on joint condition  
+```{r tidy=TRUE}
+loan$dti <- ifelse(!is.na(loan$dti_joint), loan$dti_joint, loan$dti)
+loan$annual_inc <- ifelse(!is.na(loan$annual_inc_joint), loan$annual_inc_joint, loan$annual_inc)
+loan$annual_inc[which(is.na(loan$annual_inc))] <- median(loan$annual_inc, na.rm = T)
+loan$verification_status <- ifelse(loan$application_type == 'JOINT', loan$verification_status_joint, loan$verification_status)
+select.features_2 <- c('dti', 'annual_inc', 'verification_status')
+```
+            
+Credit scores feature selection  
+inq_fi, inq_last_12m is removed for over 80% NA values.   
+The earliest_cr_line and last_credit_pull_d are removed for irrelavant.          
+          
+credit lines feature selection  
+all_util, open_acc_6m, total_cu_tl, open_il_6m, open_il_12m, open_il_24m, open_rv_12m, open_rv_24m, max_bal_bc, mths_since_last_record, il_util, mths_since_rcnt_il, total_bal_il, max_bal_bc are removed for over 80% NA values  
+policy_code and url are removed for irrelavance  
+total_acc, tot_cur_bal, open_acc, acc_now_delinq, delinq_2yrs, mths_since_last_delinq, collections_12_mths_ex_med, tot_coll_amt, pub_rec, mths_since_last_major_derog, revol_util, total_rev_hi_lim are reserved  
+
+```{r tidy=TRUE}
+#mean and median are similar so I use mean for na
+loan$total_acc[which(is.na(loan$total_acc))] <- mean(loan$total_acc, na.rm = T) 
+#mean of tot_cur_bal is more influenced by large value so I use median
+loan$tot_cur_bal[which(is.na(loan$tot_cur_bal))] <- median(loan$tot_cur_bal, na.rm = T) 
+#mean and median are similar so I use mean for na
+loan$open_acc[which(is.na(loan$open_acc))] <- mean(loan$open_acc, na.rm = T) 
+#acc_now_delinq is int number, so I use median for na
+loan$acc_now_delinq[which(is.na(loan$acc_now_delinq))] <- median(loan$acc_now_delinq, na.rm = T)
+#delinq_2yrs is int number, so I use median for na
+loan$delinq_2yrs[which(is.na(loan$delinq_2yrs))] <- median(loan$delinq_2yrs, na.rm = T)
+#mths_since_last_delinq is int number, so I use median for na
+loan$mths_since_last_delinq[which(is.na(loan$mths_since_last_delinq))] <- median(loan$mths_since_last_delinq, na.rm = T)
+#collections_12_mths_ex_med is int number, so I use median for na
+loan$collections_12_mths_ex_med[which(is.na(loan$collections_12_mths_ex_med))] <- median(loan$collections_12_mths_ex_med, na.rm = T)
+#tot_coll_amt is int number, so I use median for na
+loan$tot_coll_amt[which(is.na(loan$tot_coll_amt))] <- median(loan$tot_coll_amt, na.rm = T)
+#pub_rec is int number, so I use median for na
+loan$pub_rec[which(is.na(loan$pub_rec))] <- median(loan$pub_rec, na.rm = T)
+#mths_since_last_major_derog is int number, so I use median for na
+loan$mths_since_last_major_derog[which(is.na(loan$mths_since_last_major_derog))] <- median(loan$mths_since_last_major_derog, na.rm = T)
+#mean and median is similar so I use mean for revol_util na values 
+loan$revol_util[which(is.na(loan$revol_util))] <- mean(loan$revol_util, na.rm = T)
+#total_rev_hi_lim is int number, so I use median for na
+loan$total_rev_hi_lim[which(is.na(loan$total_rev_hi_lim))] <- median(loan$total_rev_hi_lim, na.rm = T)
+
+select.features_3 <- c('total_acc', 'tot_cur_bal', 'open_acc', 'acc_now_delinq', 'delinq_2yrs',
+                       'mths_since_last_delinq', 'collections_12_mths_ex_med', 'tot_coll_amt',
+                       'pub_rec', 'mths_since_last_major_derog', 'revol_util',
+                       'total_rev_hi_lim')
+```
+          
+
+loan feature selection  
+desc, id, title, issue_d, are removed   
+loan_amnt, application_type, purpose, term and initial_list_status are reserved  
+```{r tidy=TRUE}
+select.features_4 <- c('loan_amnt', 'application_type', 'purpose',
+                       'term', 'initial_list_status')
+```
+        
+loan payment feature selection  
+last_pymnt_amnt, last_pymnt_d, next_pymnt_d, total_pymnt, total_pymnt_inv, total_rec_int, total_rec_late_fee, total_rec_prncp are inrrelative here  
+installment, funded_amnt, funded_amnt_inv, pymnt_plan, recoveries
+collection_recovery_fee, out_prncp, out_prncp_inv are reserved  
+```{r tidy=TRUE}
+select.features_5 <- c('installment', 'funded_amnt', 'funded_amnt_inv', 'pymnt_plan',
+                       'recoveries', 'collection_recovery_fee',
+                       'out_prncp', 'out_prncp_inv')
+```
+           
+grade and int_rate are used as well  
+```{r tidy=TRUE}
+select.features <- c(select.features_1, select.features_2, select.features_3, select.features_4,
+                     select.features_5, 'grade', 'int_rate', 'loan_status_binary')
+loan <- loan[select.features]
+```
+            
+scale all numeric variables        
+```{r tidy=TRUE}
+select.features.num <- names(loan[, sapply(loan[, 1:32], is.numeric)])
+loan.scale <- loan
+loan.scale[, select.features.num] <- scale(loan.scale[, select.features.num])
+```
+      
+check the level of all category variables           
+```{r tidy=TRUE}
+select.features.cate <- names(loan.scale[, sapply(loan.scale, is.character)])
+n_levels <- sort(sapply(loan.scale[select.features.cate], function(x) {nlevels(as.factor(x))}), decreasing = TRUE)
+print(n_levels)
+```
+              
+train, test split           
+```{r tidy=TRUE}
+set.seed(1)
+train.ind <- sample(1:dim(loan)[1], 0.8 * dim(loan)[1])
+train.sub <- loan.scale[train.ind,]
+test.sub <- loan.scale[-train.ind,]
+```
+
+model train  
+```{r tidy=TRUE}
+logis.mod <- glm(loan_status_binary ~ ., train.sub, family = 'binomial')
+summary(logis.mod)
+```
+
+evaluate model  
+
+```{r tidy=TRUE}
+library(pROC)
+pred <- predict(logis.mod, test.sub[, 1:32])
+plot.roc(test.sub$loan_status_binary, pred)
+```
+
+The model seems not good so I will add regularization to make it better  
+```{r tidy=TRUE}
+library(glmnet)
+test.matrix <- model.matrix( ~., test.sub[, 1:32])
+ind <- train.sub[,1:32]
+ind <- model.matrix( ~., ind)
+dep <- train.sub[, 'loan_status_binary']
+#Use cross validation to tune parameters
+logis.cvfit <- cv.glmnet(ind, dep, family = 'binomial')
+plot(logis.cvfit)
+print(paste('The optimus lambda for model is', logis.cvfit$logis.cvfit$lambda.1se))
+cv.pred <- predict(logis.cvfit, s=logis.cvfit$lambda.1se, newx=test.matrix)
+plot.roc(test.sub$loan_status_binary, cv.pred)
+```
+
+coefficients with this model is  
+```{r tidy=TRUE}
+print(coef(logis.cvfit, s = "lambda.1se"))
+```

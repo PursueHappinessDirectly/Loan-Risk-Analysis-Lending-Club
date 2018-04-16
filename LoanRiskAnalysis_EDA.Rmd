@@ -1,0 +1,167 @@
+---
+title: "LoanRiskAnalysis"
+author: "Liang Tan"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read data
+```{r tidy=TRUE}
+loan <- read.csv('loan.csv',  stringsAsFactors = FALSE) 
+loanT <- loan
+head(loan)
+```
+Check dimension
+```{r tidy=TRUE}
+print(dim(loan))
+```
+Check data format
+```{r tidy=TRUE}
+str(loan)
+```
+       
+Calculate the number of na values for each column.    
+```{r tidy=TRUE}
+#seperate columns with over 80% NA values
+num.NA <- sort(sapply(loan, function(x) sum(is.na(x))), decreasing = TRUE) 
+remain.col = names(num.NA)[(num.NA < 0.8 * dim(loan)[1])]
+delete.col = names(num.NA)[(num.NA >= 0.8 * dim(loan)[1])]
+delete.col
+```
+
+# EDA_part_1 (What factor will influence the interest rate?)   
+
+```{r tidy=TRUE}
+{plot(density((loan$int_rate)), main='Density plot of interest rate', xlab = 'Interest rate')
+abline(v = mean(loan$int_rate), lty=2, col = 2)
+abline(v = median(loan$int_rate), lty=2, col=3)
+abline(v = quantile(loan$int_rate, 0.2), lty=2, col=4)
+abline(v = quantile(loan$int_rate, 0.8), lty=2, col=6)
+legend("topright", c('mean', 'median', '20% quantile', '80% quantile'), col = c(2,3,4,6), lty = 2, title = 'Interest rate statistics')}
+```
+
+The distribution is a bit right skew. In the future, if we want to build model with interest rate then it is better to use square root to adjust the skewness. Next I want to explore the correlation between interest rate with other numeric variables. However, we know some features are with high number of NA values. So I want to remove those features with over 80% NA values temperarily.     
+
+```{r tidy=TRUE}
+library(corrplot)
+loan <- loan[,remain.col]
+#select numerical features' name
+num.feature <- names(loan[, sapply(loan, is.numeric)])    
+#select char features' name
+char.feature <- names(loan[, sapply(loan, is.character)]) 
+#calculate the correlationship between int_rate and other numerical features
+correlation <- cor(loan$int_rate, loan[, num.feature], use = 'pairwise.complete.obs') 
+#sort the value
+correlation <- correlation[, order(correlation[1,], decreasing = TRUE)] 
+#remove correlation with itself and correlation with police_code
+correlation <- correlation[2:33] 
+```
+
+```{r tidy=TRUE}
+{barplot(correlation, main = 'Correlation between int_rate with other numerical features', ylab = 'Correlation', las=2,
+        cex.names=0.6, col=ifelse(correlation>0.15,"red","blue"))
+legend("topright", leg = c('top five correlated feature', 'other numerical feature'), fill = c("red", "blue"))}
+```
+      
+Based on correlation calculation, the top five predictive numerical features for int_rate are "total_rec_int", "revol_util", "inq_last_6mths", "total_pymnt_inv" and "total_pymnt". Next step is to explore the top five influencial category features.  
+
+```{r tidy=TRUE}
+library(ggplot2)
+ggplot(data=loan, aes(term,int_rate,fill=term))+geom_boxplot(outlier.color = "blue")+labs(title="Box plot of interest rate against term") + theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
+```
+```{r tidy=TRUE}
+t.test(subset(loan, term == ' 36 months')$int_rate, subset(loan, term == ' 60 months')$int_rate, conf.level = 0.95, mu = 0, alternative = "two.sided", paired = FALSE, var.equal = FALSE)
+```
+       
+There is a significant difference between different term. Therefore, term can be used a predictor for interest rate.   
+
+```{r tidy=TRUE}
+ggplot(data=loan, aes(grade,int_rate,fill=grade))+geom_boxplot(outlier.color = "blue")+labs(title="Box plot of Interest rate against grade") + theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
+```
+      
+There is a clear linear trend between interest rate and grade. Therefore, grade can be used a predictor for interest rate. However, based on the description of grade. It is assigned by the Lending Club. Therefore, I probably don't have this feature in advance. If a client is a return user and I can definitely use this information.     
+
+```{r tidy=TRUE}
+ggplot(data=loan, aes(verification_status,int_rate,fill=verification_status))+geom_boxplot(outlier.color = "blue")+labs(title="Box plot of interest rate against verification_status") + theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
+```
+```{r tidy=TRUE}
+t.test(subset(loan, verification_status == 'Verified')$int_rate, subset(loan, verification_status == 'Source Verified')$int_rate, conf.level = 0.95, mu = 0, alternative = "two.sided", paired = FALSE, var.equal = FALSE)
+t.test(subset(loan, verification_status == 'Not Verified')$int_rate, subset(loan, verification_status == 'Source Verified')$int_rate, conf.level = 0.95, mu = 0, alternative = "two.sided", paired = FALSE, var.equal = FALSE)
+t.test(subset(loan, verification_status == 'Not Verified')$int_rate, subset(loan, verification_status == 'Verified')$int_rate, conf.level = 0.95, mu = 0, alternative = "two.sided", paired = FALSE, var.equal = FALSE)
+```
+         
+There is a significant difference between different verification_status Therefore, verification_status can be used a predictor for interest rate.       
+
+```{r tidy=TRUE}
+ggplot(data=loan, aes(pymnt_plan,int_rate,fill=pymnt_plan))+geom_boxplot(outlier.color = "blue")+labs(title="Box plot of interest rate against pymnt_plan") + theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
+```
+```{r tidy=TRUE}
+t.test(subset(loan, pymnt_plan == 'n')$int_rate, subset(loan, pymnt_plan == 'y')$int_rate, conf.level = 0.95, mu = 0, alternative = "two.sided", paired = FALSE, var.equal = FALSE)
+```
+          
+There is a significant difference between different pymnt_plan. Therefore, pymnt_plan. can be used a predictor for interest rate.        
+
+```{r tidy=TRUE}
+ggplot(data=loan, aes(application_type,int_rate,fill=application_type))+geom_boxplot(outlier.color = "blue")+labs(title="Box plot of interest rate against application_type") + theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
+```
+```{r tidy=TRUE}
+t.test(subset(loan, application_type == 'INDIVIDUAL')$int_rate, subset(loan, application_type == 'JOINT')$int_rate, conf.level = 0.95, mu = 0, alternative = "two.sided", paired = FALSE, var.equal = FALSE)
+```
+           
+There is a significant difference between different application_type. Therefore, application_type can be used a predictor for interest rate. In conclustion, these five category variables are influenciable: "term", "grade", "verification_status", "pymnt_plan" and "application_type". Besides I am also curious about how interest rate vary with space and time.       
+
+```{r tidy=TRUE}
+library(dplyr)
+suppressPackageStartupMessages(library(maps))
+loan$region <- loan$addr_state
+loan$region <- as.factor(loan$region)
+levels(loan$region)<- c("alaska", "alabama","arkansas", "arizona", "california","colorado","connecticut","district of columbia","delaware","florida","georgia","hawaii","iowa","idaho","illinois","indiana","kansas","kentucky","louisiana","massachusetts","maryland","maine","michigan","minnesota","missouri","mississippi","montana","north carolina","north dakota","nebraska","new hampshire","new jersey","new mexico","nevada","new york","ohio","oklahoma","oregon","pennsylvania","rhode island","south carolina","south dakota","tennessee","texas","utah","virginia","vermont","washington","wisconsin","west virginia","wyoming")
+
+all_states <- map_data("state")
+state_by_rate <-loan %>% group_by(region) %>%
+                summarise(value = mean(int_rate, na.rm=TRUE))
+state_by_rate$region <- as.character(state_by_rate$region)
+
+Total <- merge(all_states, state_by_rate, by="region")
+
+p <- ggplot()
+p <- p + geom_polygon(data=Total, aes(x=long, y=lat, group = group, fill=Total$value),colour="white"
+      ) + scale_fill_continuous(low = "skyblue", high = "darkblue", guide="colorbar")
+P1 <- p + theme_bw()  + labs(fill = "Interest rate" 
+                            ,title = "Heat map of interest rate in all states", x="", y="")
+P1 + scale_y_continuous(breaks=c()) + scale_x_continuous(breaks=c()) + theme(panel.border =  element_blank(), plot.title = element_text(hjust = 0.5))
+```
+         
+# EDA_part_2 (What are the distribution of loan status?)         
+
+```{r tidy=TRUE}
+library(DescTools)
+Desc(loan$loan_status, plotit = TRUE, main = "Loan status")
+```
+           
+See how does loan_status affact interest rate.    
+
+```{r tidy=TRUE}
+ggplot(data=loan,aes(loan_status,int_rate), las=2) + geom_boxplot(aes(fill=loan_status))+labs(list(title = "Interest rate by loan_status",x = "Loan_status",y = "Interest rate"))  +theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
+```            
+           
+The majority status is "Current". The finished loan can be grouped into "Fully Paid" and "Charged off" or "Late payment".       
+
+# EDA_part_3 (What are the purpose of applying a loan with Lending Club ?)       
+
+```{r tidy=TRUE}
+Desc(loan$purpose, main = "Loan purposes", plotit = TRUE)
+```
+    
+I am also curious about how interest rate vary with purpose.      
+
+```{r tidy=TRUE}
+ggplot(data=loan,aes(purpose,int_rate), las=2) + geom_boxplot(aes(fill=purpose))+labs(list(title = "Interest rate by purpose",x = "purpose of Loan",y = "Interest rate"))  +theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5))
+```
+
+
