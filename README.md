@@ -16,7 +16,7 @@ Part one: I explored three questions in LoanRiskAnalysis_EDA part.
 
 Part two: I engineered feature and built linear regression in LoanRiskAnalysis_InterestRate part.     
 ■ Performed correlation analysis for numeric features and hypothesis test (unpaired t-test, ANOVA) for category features.     
-■ Built multi-variable linear regression model for interest rate prediction.
+■ Built multi-variable linear regression model for interest rate prediction.    
 ■ Selected high impact features through Lasso regularization.     
 ■ Evaluated the performance of interest rate model through adjusted coefficient of determination.     
 
